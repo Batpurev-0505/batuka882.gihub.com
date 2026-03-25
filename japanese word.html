@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Japanese Character Drawing Practice</title>
+  <style>
+    :root{--bg:#0f1724;--panel:#111827;--accent:#06b6d4;--muted:rgba(255,255,255,0.12)}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;background:linear-gradient(180deg,var(--bg),#071024);color:#e6eef6}
+    .wrap{max-width:980px;margin:28px auto;padding:20px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 6px 30px rgba(2,6,23,0.6)}
+    header{display:flex;align-items:center;gap:16px}
+    h1{font-size:20px;margin:0}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+    button,select,input{background:transparent;border:1px solid var(--muted);color:inherit;padding:8px 10px;border-radius:8px}
+    button:hover{border-color:var(--accent);cursor:pointer}
+    .main{display:grid;grid-template-columns:1fr 320px;gap:18px;margin-top:16px}
+    .card{background:rgba(255,255,255,0.01);padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.02)}
+    .canvas-wrap{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#051223,#071824)}
+    canvas{width:100%;height:100%;display:block;touch-action:none}
+    .sidebar{display:flex;flex-direction:column;gap:12px}
+    label{font-size:13px;color:#cfe7f2}
+    .small{font-size:13px;color:#9fb7c6}
+    footer{font-size:12px;color:#9fb7c6;margin-top:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Japanese character drawing — дасгал (JavaScript + Canvas)</h1>
+    </header>
+
+    <div class="controls">
+      <label class="small">Үсэг:</label>
+      <select id="charSelect" title="Select character">
+        <option>あ</option>
+        <option>い</option>
+        <option>う</option>
+        <option>え</option>
+        <option>お</option>
+        <option>か</option>
+        <option>き</option>
+        <option>く</option>
+        <option>け</option>
+        <option>こ</option>
+        <option>日</option>
+        <option>本</option>
+        <option>学</option>
+      </select>
+      <button id="clearBtn">Clear</button>
+      <button id="downloadBtn">Download PNG</button>
+      <label class="small">Зурах Өргөн:</label>
+      <input id="lineWidth" type="range" min="1" max="40" value="12">
+      <label class="small">Үсгийн Зааврын Ил тод байдал:</label>
+      <input id="targetOpacity" type="range" min="0" max="100" value="28">
+    </div>
+
+    <div class="main">
+      <div class="card">
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="drawCanvas"></canvas>
+        </div>
+        <footer class="small">Mouse / touch-дээр зурна. Зөвшөөрдөг: undo, clear, download.</footer>
+      </div>
+
+      <aside class="sidebar">
+        <div class="card">
+          <label>Зорилтот үсэг (faint)</label>
+          <div class="small">Үсгийг төвд томоор гаргана — та үсэгтэй давхцуулан зурна.</div>
+        </div>
+        <div class="card">
+          <label>Заавар</label>
+          <ol class="small">
+            <li>Сонгосон үсгийг харж, үсгийн дотор болон гаднах талд зур.</li>
+            <li>Line Width-ийг тохируулж үзэх.</li>
+            <li>Download PNG товчоор зурсан зургаа хадгал.
+          </ol>
+        </div>
+        <div class="card">
+          <label>Keyboard</label>
+          <div class="small">C - Clear, Z - Undo, S - Save (download)</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+  // Basic drawing practice app using canvas. No external libs.
+  const canvas = document.getElementById('drawCanvas');
+  const wrap = document.getElementById('canvasWrap');
+  const ctx = canvas.getContext('2d');
+  const charSelect = document.getElementById('charSelect');
+  const clearBtn = document.getElementById('clearBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const lineWidthRange = document.getElementById('lineWidth');
+  const targetOpacity = document.getElementById('targetOpacity');
+
+  let drawing = false;
+  let last = null;
+  let strokes = []; // for undo
+
+  function resizeCanvas(){
+    const rect = wrap.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width * devicePixelRatio);
+    canvas.height = Math.floor(rect.height * devicePixelRatio);
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    redraw();
+  }
+
+  window.addEventListener('resize', ()=>{
+    // reset transform and recalc
+    ctx.setTransform(1,0,0,1,0,0);
+    resizeCanvas();
+  });
+
+  function drawTarget(){
+    // draw faint character in center
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.save();
+    ctx.clearRect(0,0,w,h);
+
+    // grid
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    for(let x=0;x<w;x+=w/6){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+    for(let y=0;y<h;y+=h/6){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+
+    // target character
+    const char = charSelect.value || 'あ';
+    const fontSize = Math.floor(Math.min(w,h) * 0.72);
+    ctx.fillStyle = `rgba(255,255,255,${(targetOpacity.value/100).toFixed(2)})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${fontSize}px serif`;
+    ctx.fillText(char, w/2, h/2+ (fontSize*0.02));
+    ctx.restore();
+  }
+
+  function redraw(){
+    // draw target then strokes on top
+    drawTarget();
+    // draw saved strokes
+    for(const stroke of strokes){
+      ctx.beginPath();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = stroke.width;
+      ctx.strokeStyle = stroke.color;
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for(let i=1;i<stroke.points.length;i++) ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      ctx.stroke();
+    }
+  }
+
+  function screenToCanvas(e){
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX ?? e.touches?.[0]?.clientX) - rect.left;
+    const y = (e.clientY ?? e.touches?.[0]?.clientY) - rect.top;
+    return {x,y};
+  }
+
+  function pointerDown(e){
+    e.preventDefault();
+    drawing = true;
+    last = screenToCanvas(e);
+    const stroke = {width: parseInt(lineWidthRange.value,10), color: 'rgba(255,255,255,0.95)', points: [last]};
+    strokes.push(stroke);
+  }
+  function pointerMove(e){
+    if(!drawing) return;
+    e.preventDefault();
+    const p = screenToCanvas(e);
+    const currentStroke = strokes[strokes.length-1];
+    currentStroke.points.push(p);
+    // draw incremental line
+    ctx.beginPath();
+    ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.lineWidth = currentStroke.width;
+    ctx.strokeStyle = currentStroke.color;
+    ctx.moveTo(last.x,last.y);
+    ctx.lineTo(p.x,p.y);
+    ctx.stroke();
+    last = p;
+  }
+  function pointerUp(e){
+    drawing=false; last=null;
+  }
+
+  // Events
+  canvas.addEventListener('pointerdown', pointerDown);
+  canvas.addEventListener('pointermove', pointerMove);
+  window.addEventListener('pointerup', pointerUp);
+  // touch fallback
+
+  clearBtn.addEventListener('click', ()=>{strokes=[];redraw();});
+  downloadBtn.addEventListener('click', ()=>{
+    // create a downscaled copy that flattens the target + drawing
+    const out = document.createElement('canvas');
+    out.width = canvas.width; out.height = canvas.height;
+    const octx = out.getContext('2d');
+    // draw background dark
+    octx.fillStyle = '#071024'; octx.fillRect(0,0,out.width,out.height);
+    // scale to device
+    octx.scale(devicePixelRatio,devicePixelRatio);
+    // draw target
+    const w = out.clientWidth || canvas.clientWidth;
+    const h = out.clientHeight || canvas.clientHeight;
+    octx.textAlign='center';octx.textBaseline='middle';
+    const fontSize = Math.floor(Math.min(w,h)*0.72);
+    octx.font = `600 ${fontSize}px serif`;
+    octx.fillStyle = `rgba(255,255,255,${(targetOpacity.value/100).toFixed(2)})`;
+    octx.fillText(charSelect.value, w/2, h/2 + (fontSize*0.02));
+    // draw strokes
+    for(const stroke of strokes){
+      octx.beginPath(); octx.lineJoin='round'; octx.lineCap='round';
+      octx.lineWidth = stroke.width; octx.strokeStyle = stroke.color;
+      octx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for(let i=1;i<stroke.points.length;i++) octx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      octx.stroke();
+    }
+    const link = document.createElement('a');
+    link.download = `${charSelect.value || 'character'}.png`;
+    link.href = out.toDataURL('image/png');
+    link.click();
+  });
+
+  lineWidthRange.addEventListener('input', ()=>{});
+  targetOpacity.addEventListener('input', ()=>{redraw();});
+  charSelect.addEventListener('change', ()=>{redraw();});
+
+  // keyboard shortcuts
+  window.addEventListener('keydown',(e)=>{
+    if(e.key === 'c' || e.key === 'C') {strokes=[];redraw();}
+    if(e.key === 'z' || e.key === 'Z') {strokes.pop();redraw();}
+    if(e.key === 's' || e.key === 'S') {downloadBtn.click();}
+  });
+
+  // initial
+  resizeCanvas();
+  // also observe wrap size changes
+  const ro = new ResizeObserver(resizeCanvas);
+  ro.observe(wrap);
+</script>
+</body>
+</html>
